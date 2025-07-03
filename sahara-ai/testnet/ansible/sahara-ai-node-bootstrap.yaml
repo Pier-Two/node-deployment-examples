@@ -1,0 +1,97 @@
+- name: "Sahara AI Node Bootstrap"
+  hosts: all
+  become: yes
+
+  vars:
+    datadir: "/data1/sahara"
+    moniker: "{{ app.vars.moniker }}"
+    external_ip: "{{ app.vars.external_ip }}"
+
+  tasks:
+    - name: Ensure directories exist
+      become: yes
+      file:
+        path: "{{ item }}"
+        state: directory
+        recurse: yes
+      loop:
+        - "{{ datadir }}"
+
+    - name: Clone Sahara Testnet Node repository
+      git:
+        repo: "https://github.com/SaharaLabsAI/setup-testnet-node.git"
+        dest: "{{ datadir }}/setup-testnet-node"
+        update: yes
+
+    - name: Get latest block height
+      uri:
+        url: "https://testnet-cos-rpc1.saharalabs.ai/status"
+        method: GET
+        return_content: yes
+        validate_certs: no
+      register: status_resp
+
+    - name: Set trust height fact (subtract 3000)
+      set_fact:
+        trust_height: "{{ status_resp.json.result.sync_info.latest_block_height | int - 3000 }}"
+
+    - name: Get trust hash at trust_height
+      uri:
+        url: "https://testnet-cos-rpc1.saharalabs.ai/commit?height={{ trust_height }}"
+        method: GET
+        return_content: yes
+        validate_certs: no
+      register: commit_resp
+
+    - name: Set trust hash fact
+      set_fact:
+        trust_hash: "{{ commit_resp.json.result.signed_header.commit.block_id.hash }}"
+
+    - name: Ensure Prometheus port is listed under ports
+      lineinfile:
+        path: "{{ datadir }}/setup-testnet-node/docker-compose.yaml"
+        insertafter: '^\s*ports:$'
+        line: '      - 26660:26660'
+        state: present
+
+    - name: Configure moniker in config.toml
+      replace:
+        path: "{{ datadir }}/setup-testnet-node/chain-data/config/config.toml"
+        regexp: "^moniker\\s*=\\s*\".*\""
+        replace: "moniker = \"{{ moniker }}\""
+
+    - name: Configure external_address in config.toml
+      replace:
+        path: "{{ datadir }}/setup-testnet-node/chain-data/config/config.toml"
+        regexp: "^external_address\\s*=\\s*\".*\""
+        replace: "external_address = \"tcp://{{ external_ip }}:26656\""
+
+    - name: Configure Prometheus listen address in config.toml
+      replace:
+        path: "{{ datadir }}/setup-testnet-node/chain-data/config/config.toml"
+        regexp: '^prometheus_listen_addr\s*=\s*\".*\"$'
+        replace: 'prometheus_listen_addr = "0.0.0.0:26660"'
+
+    - name: Configure max_num_inbound_peers in config.toml
+      replace:
+        path: "{{ datadir }}/setup-testnet-node/chain-data/config/config.toml"
+        regexp: '^max_num_inbound_peers\s*=\s*.*'
+        replace: 'max_num_inbound_peers = 100'
+
+    - name: Configure max_num_outbound_peers in config.toml
+      replace:
+        path: "{{ datadir }}/setup-testnet-node/chain-data/config/config.toml"
+        regexp: '^max_num_outbound_peers\s*=\s*.*'
+        replace: 'max_num_outbound_peers = 40'
+
+    - name: Configure trust_height in config.toml
+      replace:
+        path: "{{ datadir }}/setup-testnet-node/chain-data/config/config.toml"
+        regexp: '^trust_height\s*=\s*.*'
+        replace: 'trust_height = {{ trust_height }}'
+
+    - name: Configure trust_hash in config.toml
+      replace:
+        path: "{{ datadir }}/setup-testnet-node/chain-data/config/config.toml"
+        regexp: '^trust_hash\s*=\s*.*'
+        replace: 'trust_hash = "{{ trust_hash }}"'

@@ -1,0 +1,28 @@
+- name: "Sahara AI Node Deployment"
+  hosts: all
+  become: yes
+
+  vars:
+    datadir: "/data1/sahara"
+    moniker: "{{ app.vars.moniker }}"
+    external_ip: "{{ app.vars.external_ip }}"
+
+  tasks:  
+    - name: Check if Sahara Testnet node containers are running
+      command: docker compose ps --services --filter "status=running"
+      args:
+        chdir: "{{ datadir }}/setup-testnet-node"
+      register: compose_running
+      changed_when: false
+      failed_when: false
+
+    - name: Stop existing Sahara Testnet node containers
+      command: docker compose down
+      args:
+        chdir: "{{ datadir }}/setup-testnet-node"
+      when: compose_running.stdout != ""
+
+    - name: Start Sahara Testnet node with Docker Compose
+      command: docker compose up -d
+      args:
+        chdir: "{{ datadir }}/setup-testnet-node"
